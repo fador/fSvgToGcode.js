@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SVG to G-code</title>
+  <script type="text/javascript">
+    var gcode_tool_down = "M3 S1000";
+    var gcode_tool_up = "M5";
+    var gcode_init="G01 E0\nG21\nG90";
+    const segments = 20;
+    var toolDown_state = false;
+    var toolDown_x = 0.0;
+    var toolDown_y = 0.0;
+
+    function toolDown(gcode, x, y) {
+      if(!toolDown_state) {
+        gcode.push(gcode_tool_down);
+        toolDown_state = true;
+        toolDown_x = x;
+        toolDown_y = y;
+      }
+      return gcode;
+    }
+
+    function toolUp(gcode, x, y) {
+      if(toolDown_state) {
+        gcode.push(gcode_tool_up);
+        toolDown_state = false;
+      }
+      return gcode;
+    }
+
+    function parseCoords(coords) {
+      let x = 0.0;
+      let y = 0.0;
+      let pos = 0;
+      let done = false;
+      coords = coords.split(',');
+      let coord = [];
+      for(let i = 0; i < coords.length; i++) {
+        coord.push(parseFloat(coords[i].trim()));
+      }
+      return coord;
+    }
+
+    function parsePathD(d) {
+      d = d.trim();
+      d = d.split(/[\s]+/g);
+      for(var i = 0; i < d.length; i++) {
+        d[i] = d[i].trim();
+      }
+
+      //console.log(d);
+      let pos = 0;
+
+      let done = false;
+
+      let cur_x = 0.0; 
+      let cur_y = 0.0;
+      var gcode = []; // Output G-code
+      let coord = [];
+      var nextCode = "";
+      toolDown_state = false;
+      toolDown_x = 0.0;
+      toolDown_y = 0.0;
+
+      while(pos < d.length && !done) {
+        var type = (!isNaN(d[pos][0]) || d[pos][0] == '-')?nextCode:d[pos++];
+        switch(type) {
+          case "M":
+          case "m":
+            gcode = toolUp(gcode, cur_x, cur_y);
+            coord = parseCoords(d[pos++]);
+            if(type == "M") {
+              cur_x = coord[0];
+              cur_y = coord[1];
+            } else {
+              cur_x += coord[0];
+              cur_y += coord[1];
+            }            
+            gcode.push("G1 X" + cur_x + " Y" + cur_y);
+            nextCode = (type == "M")?"L":"l";
+            break;
+          case "L":
+          case "l":
+            gcode = toolDown(gcode, cur_x, cur_y);
+            coord = parseCoords(d[pos++]);            
+            if(type == "L") {
+              cur_x = coord[0];
+              cur_y = coord[1];
+            } else {
+              cur_x += coord[0];
+              cur_y += coord[1];
+            }
+            
+            gcode.push("G1 X" + cur_x + " Y" + cur_y);
+            nextCode = (type == "L")?"L":"l";
+            break;
+          case "H":
+          case "h":
+            gcode = toolDown(gcode, cur_x, cur_y);
+            coord = parseCoords(d[pos++]);            
+            if(type == "V") cur_x = coord[0];
+            else  cur_x += coord[0];            
+            gcode.push("G1 X" + cur_x + " Y" + cur_y);
+            nextCode = (type == "H")?"H":"h";
+            break;
+          case "V":
+          case "v":
+            gcode = toolDown(gcode, cur_x, cur_y);
+            coord = parseCoords(d[pos++]);
+            if(type == "V") cur_y = coord[0];
+            else  cur_y += coord[0];
+            gcode.push("G1 X" + cur_x + " Y" + cur_y);
+            nextCode = (type == "V")?"V":"v";
+            break;
+          case "Z":
+          case "z":
+            gcode.push("G1 X" + toolDown_x + " Y" + toolDown_y);
+            cur_x = toolDown_x;
+            cur_y = toolDown_y;
+            break;
+          case "C":
+          case "c":            
+            gcode = toolDown(gcode, cur_x, cur_y);
+            // coords now has start control point, end control point, end point
+            // we need to convert the bezier curve to a series of line segments
+            // we'll use 10 segments for now
+            var x_start = cur_x;
+            var y_start = cur_y;
+            
+            coord = parseCoords(d[pos++]);
+            var x1 = coord[0];
+            var y1 = coord[1];
+            coord = parseCoords(d[pos++]);
+            var x2 = coord[0];
+            var y2 = coord[1];
+            coord = parseCoords(d[pos++]);
+            var x_end = coord[0];
+            var y_end = coord[1];
+            if(type == "c") { // relative
+              x1 += cur_x;
+              y1 += cur_y;
+              x2 += cur_x;
+              y2 += cur_y;
+              x_end += cur_x;
+              y_end += cur_y;
+            }
+            var t = 0.0;           
+          
+            var dt = 1.0/segments;
+            var x_last = x_start;
+            var y_last = y_start;
+            for(var i = 0; i < segments; i++) {
+              t += dt;
+              var x_temp = (1-t)*(1-t)*(1-t)*x_start + 3*(1-t)*(1-t)*t*x1 + 3*(1-t)*t*t*x2 + t*t*t*x_end;
+              var y_temp = (1-t)*(1-t)*(1-t)*y_start + 3*(1-t)*(1-t)*t*y1 + 3*(1-t)*t*t*y2 + t*t*t*y_end;
+              gcode.push("G1 X" + x_temp + " Y" + y_temp);
+              x_last = x_temp;
+              y_last = y_temp;
+            }
+
+            if(type == "C") {
+              cur_x = x_end;
+              cur_y = y_end;
+            } else {
+              cur_x += x_end;
+              cur_y += y_end;
+            }  
+            
+            nextCode = type;
+            break;
+          case "Q":
+          case "q":
+            gcode = toolDown(gcode, cur_x, cur_y);
+            // coords now has start control point, end point
+            // we need to convert the bezier curve to a series of line segments
+            // we'll use 10 segments for now
+            var x_start = cur_x;
+            var y_start = cur_y;
+
+            coord = parseCoords(d[pos++]);
+            var x1 = coord[0];
+            var y1 = coord[1];
+            coord = parseCoords(d[pos++]);
+            var x_end = coord[0];
+            var y_end = coord[1];
+            if(type == "q") { // relative
+              x1 += cur_x;
+              y1 += cur_y;
+              x_end += cur_x;
+              y_end += cur_y;
+            }
+            var t = 0.0;           
+
+            var dt = 1.0/segments;
+            var x_last = x_start;
+            var y_last = y_start;
+            for(var i = 0; i < segments; i++) {
+              t += dt;
+              var x_temp = (1-t)*(1-t)*x_start + 2*(1-t)*t*x1 + t*t*x_end;
+              var y_temp = (1-t)*(1-t)*y_start + 2*(1-t)*t*y1 + t*t*y_end;
+              gcode.push("G1 X" + x_temp + " Y" + y_temp);
+              x_last = x_temp;
+              y_last = y_temp;
+            }
+            nextCode = type;
+            break;
+          default:
+           console.log("Command not found: pos " +pos + " type " + type + " prev " + d[pos-2] + " next " + d[pos-1] +  " " + d[pos]);
+           done = true;
+        }
+      }
+      gcode = toolUp(gcode, cur_x, cur_y);
+      return gcode;
+    }
+
+    function parseSvg(data) {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(data, "image/svg+xml");
+      var paths = doc.getElementsByTagName("path");
+
+      for(var i = -1; i < paths.length; i++) {
+        var gcode;
+        if(i == -1) {
+          gcode = gcode_init.split("\n");
+        } else {
+          var path = paths[i];
+          var d = path.getAttribute("d");
+          gcode = parsePathD(d);
+        }
+        //console.log(gcode.join("\n"));
+        // Add to g-code div
+        var gcodeDiv = document.getElementById("g-code");
+        var gcodeText = document.createTextNode(gcode.join("\n")+"\n");
+        gcodeDiv.appendChild(gcodeText);
+      }
+
+      var polylines = doc.getElementsByTagName("polyline");
+      for(var i = 0; i < polylines.length; i++) {
+        var polyline = polylines[i];
+        var points = polyline.getAttribute("points");
+        points = points.split(/[\s]+/g);
+        for(var j = 0; j < points.length; j++) {
+          points[j] = points[j].trim();
+        }
+        var gcode = [];
+        gcode.push(gcode_tool_down);
+        for(var j = 0; j < points.length; j++) {
+          var point = points[j].split(",");
+          var x = parseFloat(point[0]);
+          var y = parseFloat(point[1]);
+          gcode.push("G1 X" + x + " Y" + y);
+        }
+        gcode.push(gcode_tool_up);
+        //console.log(gcode.join("\n"));
+        // Add to g-code div
+        var gcodeDiv = document.getElementById("g-code");
+        var gcodeText = document.createTextNode(gcode.join("\n")+"\n");
+        gcodeDiv.appendChild(gcodeText);
+      }
+
+
+
+      /*
+      var gcode = [];
+      for (var i = 0; i < points.length; i++) {
+        var point = points[i];
+        for (var j = 0; j < point.length; j++) {
+          var p = point[j];
+          gcode.push("G1 X" + p[0] + " Y" + p[1]);
+        }
+      }*/
+      return gcode;
+    }
+    function dropHandler(ev) {
+      console.log("File(s) dropped");
+
+      // Prevent default behavior (Prevent file from being opened)
+      ev.preventDefault();
+
+      const reader = new FileReader();
+
+      reader.addEventListener(
+        "load",
+        () => {
+          // this will then display a text file
+          console.log(parseSvg(reader.result));
+        },
+        false,
+      );
+
+
+      if (ev.dataTransfer.items) {
+        // Use DataTransferItemList interface to access the file(s)
+        [...ev.dataTransfer.items].forEach((item, i) => {
+          // If dropped items aren't files, reject them
+          if (item.kind === "file") {
+            const file = item.getAsFile();
+            console.log(`… file[${i}].name = ${file.name}`);
+            reader.readAsText(file);
+          }
+        });
+      } else {
+        // Use DataTransfer interface to access the file(s)
+        [...ev.dataTransfer.files].forEach((file, i) => {
+          console.log(`… file[${i}].name = ${file.name}`);
+          reader.readAsText(file);
+        });
+      }
+    }
+
+    function dragOverHandler(ev) {
+      console.log("File(s) in drop zone");
+
+      // Prevent default behavior (Prevent file from being opened)
+      ev.preventDefault();
+    }
+
+    function copyGcode() {
+      var gcodeDiv = document.getElementById("g-code");
+      var gcodeText = gcodeDiv.innerText;
+      var textArea = document.createElement("textarea");
+      textArea.value = gcodeText;
+      document.body.appendChild(textArea);
+      textArea.select();
+      textArea.setSelectionRange(0, 99999);
+      document.execCommand("Copy");
+      textArea.remove();
+    }
+  </script>
+  <style type="text/css">
+  #drop_zone {
+    background-color: #EEE;
+    border: #999 5px dashed;
+    width: 290px;
+    height: 200px;
+    padding: 8px;
+    font-size: 18px;
+  }
+  #g-code {
+    background-color: #EEE;
+    border: #999 1px;
+    width: 400px;
+    height: 800px;
+    padding: 8px;
+    font-size: 18px;
+    overflow: scroll;
+    white-space: pre;
+  }
+  </style>
+</head>
+
+<body>
+  <div
+  id="drop_zone"
+  ondrop="dropHandler(event);"
+  ondragover="dragOverHandler(event);">
+  <p>Drag one or more files to this <i>drop zone</i>.</p>
+</div>
+<br />
+Output: <a href="#" onClick="copyGcode(); return false;">copy</a>
+<br />
+<div id="g-code"></div>
+
+</body>
+</html>
