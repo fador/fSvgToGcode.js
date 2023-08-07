@@ -22,11 +22,7 @@
         toolDown_state = true;
         toolDown_x = x;
         toolDown_y = y;
-      }
-      if(!inSubpath) {
-        subPathStart_x = x;
-        subPathStart_y = y;
-      }
+      }      
       return gcode;
     }
 
@@ -66,6 +62,13 @@
       return gcode;
     }
 
+    function checkSubpath(x,y) {
+      if(!inSubpath) {
+        subPathStart_x = x;
+        subPathStart_y = y;
+      }
+    }
+
     function parsePathD(d) {
       d = d.trim();
       d = d.split(/[\s]+/g);
@@ -94,6 +97,7 @@
       while(pos < d.length && !done) {
         inSubpath = (!isNaN(d[pos][0]) || d[pos][0] == '-');
         var type = inSubpath?nextCode:d[pos++];
+        gcode.push(";Type: " + type);
         switch(type) {
           case "M":
           case "m":
@@ -122,7 +126,9 @@
             }
             
             gcode = addGcode(gcode,"G1", cur_x, cur_y);
-            nextCode = (type == "L")?"L":"l";
+            nextCode = type;
+
+            checkSubpath(cur_x, cur_y);
             break;
           case "H":
           case "h":
@@ -131,7 +137,8 @@
             if(type == "V") cur_x = coord[0];
             else  cur_x += coord[0];            
             gcode = addGcode(gcode,"G1", cur_x, cur_y);
-            nextCode = (type == "H")?"H":"h";
+            nextCode = type;
+            checkSubpath(cur_x, cur_y);
             break;
           case "V":
           case "v":
@@ -140,7 +147,8 @@
             if(type == "V") cur_y = coord[0];
             else  cur_y += coord[0];
             gcode = addGcode(gcode,"G1", cur_x, cur_y);
-            nextCode = (type == "V")?"V":"v";
+            nextCode = type;
+            checkSubpath(cur_x, cur_y);
             break;
           case "Z":
           case "z":
@@ -207,6 +215,8 @@
             if(DEBUG) gcode.push(";Cubic Bezier Curve Done");
             
             nextCode = type;
+
+            checkSubpath(cur_x, cur_y);
             break;
           case "Q": // Bezier curve
           case "q":
@@ -242,7 +252,12 @@
               x_last = x_temp;
               y_last = y_temp;
             }
+            cur_x = x_end;
+            cur_y = y_end;
+
             nextCode = type;
+
+            checkSubpath(cur_x, cur_y);
             break;
           case "S": // Smooth curve
           case "s":
@@ -298,6 +313,8 @@
               y_last = y_temp;
             }
             nextCode = type;
+
+            checkSubpath(cur_x, cur_y);
             break;
             case "A": // Arc
             case "a":
@@ -336,6 +353,8 @@
               cur_x = x_end;
               cur_y = y_end;
               nextCode = type;
+
+              checkSubpath(cur_x, cur_y);
               break;
           default:
            console.log("Command not found: pos " +pos + " type " + type + " prev " + d[pos-2] + " next " + d[pos-1] +  " " + d[pos]);
