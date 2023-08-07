@@ -8,9 +8,13 @@
     var gcode_tool_up = "M5";
     var gcode_init="G01 E0\nG21\nG90";
     const segments = 20;
+    const DEBUG = true;
     var toolDown_state = false;
     var toolDown_x = 0.0;
     var toolDown_y = 0.0;
+    var subPathStart_x = 0.0;
+    var subPathStart_y = 0.0;
+    var inSubpath = false;
 
     function toolDown(gcode, x, y) {
       if(!toolDown_state) {
@@ -18,6 +22,10 @@
         toolDown_state = true;
         toolDown_x = x;
         toolDown_y = y;
+      }
+      if(!inSubpath) {
+        subPathStart_x = x;
+        subPathStart_y = y;
       }
       return gcode;
     }
@@ -43,6 +51,21 @@
       return coord;
     }
 
+    function trimFixed(num) {
+      num = num.toFixed(16);
+      while(num.includes(".") && (num.endsWith("0") || num.endsWith("."))) {
+        num = num.substring(0, num.length-1);
+      }
+      return num;
+    }
+
+    function addGcode(gcode, code, x, y, extra="") {
+      if(x.toString().includes("e")) x = trimFixed(x);
+      if(y.toString().includes("e")) y = trimFixed(y);
+      gcode.push(code + " X" + x + " Y" + y +((extra!="")?" " + extra:""));
+      return gcode;
+    }
+
     function parsePathD(d) {
       d = d.trim();
       d = d.split(/[\s]+/g);
@@ -60,12 +83,17 @@
       var gcode = []; // Output G-code
       let coord = [];
       var nextCode = "";
+      var lastCode = "";
+      let last_x2 = 0.0;
+      let last_y2 = 0.0;
+
       toolDown_state = false;
       toolDown_x = 0.0;
       toolDown_y = 0.0;
 
       while(pos < d.length && !done) {
-        var type = (!isNaN(d[pos][0]) || d[pos][0] == '-')?nextCode:d[pos++];
+        inSubpath = (!isNaN(d[pos][0]) || d[pos][0] == '-');
+        var type = inSubpath?nextCode:d[pos++];
         switch(type) {
           case "M":
           case "m":
@@ -78,7 +106,7 @@
               cur_x += coord[0];
               cur_y += coord[1];
             }            
-            gcode.push("G1 X" + cur_x + " Y" + cur_y);
+            gcode = addGcode(gcode,"G0", cur_x, cur_y);
             nextCode = (type == "M")?"L":"l";
             break;
           case "L":
@@ -93,7 +121,7 @@
               cur_y += coord[1];
             }
             
-            gcode.push("G1 X" + cur_x + " Y" + cur_y);
+            gcode = addGcode(gcode,"G1", cur_x, cur_y);
             nextCode = (type == "L")?"L":"l";
             break;
           case "H":
@@ -102,7 +130,7 @@
             coord = parseCoords(d[pos++]);            
             if(type == "V") cur_x = coord[0];
             else  cur_x += coord[0];            
-            gcode.push("G1 X" + cur_x + " Y" + cur_y);
+            gcode = addGcode(gcode,"G1", cur_x, cur_y);
             nextCode = (type == "H")?"H":"h";
             break;
           case "V":
@@ -111,17 +139,17 @@
             coord = parseCoords(d[pos++]);
             if(type == "V") cur_y = coord[0];
             else  cur_y += coord[0];
-            gcode.push("G1 X" + cur_x + " Y" + cur_y);
+            gcode = addGcode(gcode,"G1", cur_x, cur_y);
             nextCode = (type == "V")?"V":"v";
             break;
           case "Z":
           case "z":
-            gcode.push("G1 X" + toolDown_x + " Y" + toolDown_y);
-            cur_x = toolDown_x;
-            cur_y = toolDown_y;
+            gcode = addGcode(gcode,"G1",subPathStart_x, subPathStart_y);
+            cur_x = subPathStart_x;
+            cur_y = subPathStart_y;
             break;
-          case "C":
-          case "c":            
+          case "C": // Cubic Bezier curve
+          case "c":
             gcode = toolDown(gcode, cur_x, cur_y);
             // coords now has start control point, end control point, end point
             // we need to convert the bezier curve to a series of line segments
@@ -138,6 +166,7 @@
             coord = parseCoords(d[pos++]);
             var x_end = coord[0];
             var y_end = coord[1];
+
             if(type == "c") { // relative
               x1 += cur_x;
               y1 += cur_y;
@@ -146,6 +175,15 @@
               x_end += cur_x;
               y_end += cur_y;
             }
+
+            if(DEBUG) {
+              gcode.push(";Cubic Bezier Curve");
+              gcode.push(";Start: " + x_start + ", " + y_start);
+              gcode.push(";Control 1: " + x1 + ", " + y1);
+              gcode.push(";Control 2: " + x2 + ", " + y2);
+              gcode.push(";End: " + x_end + ", " + y_end);
+            }
+
             var t = 0.0;           
           
             var dt = 1.0/segments;
@@ -155,22 +193,22 @@
               t += dt;
               var x_temp = (1-t)*(1-t)*(1-t)*x_start + 3*(1-t)*(1-t)*t*x1 + 3*(1-t)*t*t*x2 + t*t*t*x_end;
               var y_temp = (1-t)*(1-t)*(1-t)*y_start + 3*(1-t)*(1-t)*t*y1 + 3*(1-t)*t*t*y2 + t*t*t*y_end;
-              gcode.push("G1 X" + x_temp + " Y" + y_temp);
+              gcode = addGcode(gcode,"G1", x_temp,y_temp);
               x_last = x_temp;
               y_last = y_temp;
             }
 
-            if(type == "C") {
-              cur_x = x_end;
-              cur_y = y_end;
-            } else {
-              cur_x += x_end;
-              cur_y += y_end;
-            }  
+            last_x2 = x2;
+            last_y2 = y2;
+
+            cur_x = x_end;
+            cur_y = y_end;
+
+            if(DEBUG) gcode.push(";Cubic Bezier Curve Done");
             
             nextCode = type;
             break;
-          case "Q":
+          case "Q": // Bezier curve
           case "q":
             gcode = toolDown(gcode, cur_x, cur_y);
             // coords now has start control point, end point
@@ -200,16 +238,110 @@
               t += dt;
               var x_temp = (1-t)*(1-t)*x_start + 2*(1-t)*t*x1 + t*t*x_end;
               var y_temp = (1-t)*(1-t)*y_start + 2*(1-t)*t*y1 + t*t*y_end;
-              gcode.push("G1 X" + x_temp + " Y" + y_temp);
+              gcode = addGcode(gcode,"G1", x_temp,y_temp);
               x_last = x_temp;
               y_last = y_temp;
             }
             nextCode = type;
             break;
+          case "S": // Smooth curve
+          case "s":
+            gcode = toolDown(gcode, cur_x, cur_y);
+            // coords now has end control point, end point
+            // we need to convert the bezier curve to a series of line segments
+            // we'll use 10 segments for now
+            var x_start = cur_x;
+            var y_start = cur_y;
+
+            coord = parseCoords(d[pos++]);
+            var x2 = coord[0];
+            var y2 = coord[1];
+            coord = parseCoords(d[pos++]);
+            var x_end = coord[0];
+            var y_end = coord[1];
+            if(type == "s") { // relative
+              x2 += cur_x;
+              y2 += cur_y;
+              x_end += cur_x;
+              y_end += cur_y;
+            }
+            var x1 = x_start;
+            var y1 = y_start;
+
+            // If previous point was smooth or cubic, use previous control point
+            if(lastCode == "S" || lastCode == "s" || lastCode == "C" || lastCode == "c") {
+              // reflect previous control point
+              x1 = 2*x_start-last_x2;
+              y1 = 2*y_start-last_y2;
+            }
+            if(DEBUG) {
+              gcode.push(";Smooth Cubic Bezier Curve");
+              gcode.push(";Start: " + x_start + ", " + y_start);
+              gcode.push(";Control 1: " + x1 + ", " + y1);
+              gcode.push(";Control 2: " + x2 + ", " + y2);
+              gcode.push(";End: " + x_end + ", " + y_end);
+            }
+            last_x2 = x2;
+            last_y2 = y2;
+
+            var t = 0.0;           
+
+            var dt = 1.0/segments;
+            var x_last = x_start;
+            var y_last = y_start;
+            for(var i = 0; i < segments; i++) {
+              t += dt;
+              var x_temp = (1-t)*(1-t)*(1-t)*x_start + 3*(1-t)*(1-t)*t*x1 + 3*(1-t)*t*t*x2 + t*t*t*x_end;
+              var y_temp = (1-t)*(1-t)*(1-t)*y_start + 3*(1-t)*(1-t)*t*y1 + 3*(1-t)*t*t*y2 + t*t*t*y_end;
+              gcode = addGcode(gcode,"G1", x_temp,y_temp);
+              x_last = x_temp;
+              y_last = y_temp;
+            }
+            nextCode = type;
+            break;
+            case "A": // Arc
+            case "a":
+              gcode = toolDown(gcode, cur_x, cur_y);
+              // coords now has rx, ry, x-axis-rotation, large-arc-flag, sweep-flag, end point
+              // we need to convert the arc to a series of line segments
+              // we'll use 10 segments for now
+              var x_start = cur_x;
+              var y_start = cur_y;
+
+              coord = parseCoords(d[pos++]);
+              var rx = coord[0];
+              var ry = coord[1];
+              var x_axis_rotation = d[pos++];
+              var large_arc_flag = d[pos++];
+              var sweep_flag = d[pos++];
+              coord = parseCoords(d[pos++]);
+              var x_end = coord[0];
+              var y_end = coord[1];
+              if(type == "a") { // relative
+                x_end += cur_x;
+                y_end += cur_y;
+              }
+              var t = 0.0;
+              var dt = 1.0/segments;
+              var x_last = x_start;
+              var y_last = y_start;
+              for(var i = 0; i < segments; i++) {
+                t += dt;
+                var x_temp = (1-t)*x_start + t*x_end;
+                var y_temp = (1-t)*y_start + t*y_end;
+                //gcode = addGcode(gcode,"G1", x_temp,y_temp);
+                x_last = x_temp;
+                y_last = y_temp;
+              }
+              cur_x = x_end;
+              cur_y = y_end;
+              nextCode = type;
+              break;
           default:
            console.log("Command not found: pos " +pos + " type " + type + " prev " + d[pos-2] + " next " + d[pos-1] +  " " + d[pos]);
            done = true;
         }
+        lastCode = type;
       }
       gcode = toolUp(gcode, cur_x, cur_y);
       return gcode;
@@ -237,30 +369,168 @@
       }
 
       var polylines = doc.getElementsByTagName("polyline");
-      for(var i = 0; i < polylines.length; i++) {
-        var polyline = polylines[i];
-        var points = polyline.getAttribute("points");
+      for(let i = 1; i < polylines.length; i++) {
+        let polyline = polylines[i];
+        let points = polyline.getAttribute("points");
         points = points.split(/[\s]+/g);
-        for(var j = 0; j < points.length; j++) {
+        for(let j = 0; j < points.length; j++) {
           points[j] = points[j].trim();
         }
-        var gcode = [];
+        let gcode = [];
         gcode.push(gcode_tool_down);
-        for(var j = 0; j < points.length; j++) {
-          var point = points[j].split(",");
-          var x = parseFloat(point[0]);
-          var y = parseFloat(point[1]);
-          gcode.push("G1 X" + x + " Y" + y);
+        for(let j = 0; j < points.length; j++) {
+          let point = points[j].split(",");
+          if(point.length != 2) continue;
+          let x = parseFloat(point[0]);
+          let y = parseFloat(point[1]);
+          if(j == 0) gcode = addGcode(gcode, "G0", x, y);
+          else gcode = addGcode(gcode, "G1", x, y);
         }
+
         gcode.push(gcode_tool_up);
         //console.log(gcode.join("\n"));
         // Add to g-code div
-        var gcodeDiv = document.getElementById("g-code");
-        var gcodeText = document.createTextNode(gcode.join("\n")+"\n");
+        let gcodeDiv = document.getElementById("g-code");
+        let gcodeText = document.createTextNode(gcode.join("\n")+"\n");
         gcodeDiv.appendChild(gcodeText);
       }
 
+      var polygons = doc.getElementsByTagName("polygon");
+      for(let i = 0; i < polygons.length; i++) {
+        let polygon = polygons[i];
+        let points = polygon.getAttribute("points");
+        points = points.split(/[\s]+/g);
+        for(let j = 0; j < points.length; j++) {
+          points[j] = points[j].trim();
+        }
+        let gcode = [];
+        gcode.push(gcode_tool_down);
+        cur_x = 0.0;
+        cur_y = 0.0;
+        for(let j = 0; j < points.length; j++) {
+          let point = points[j].split(",");
+          if(point.length != 2) continue;
+          let x = parseFloat(point[0]);
+          let y = parseFloat(point[1]);
+          if(j == 0) gcode = addGcode(gcode, "G0", x, y);
+          else gcode = addGcode(gcode, "G1", x, y);
+          cur_x = x;
+          cur_y = y;
+        }
+        let first_point = points[0].split(",");
+        if(cur_x != first_point[0] || cur_y != first_point[1]) gcode.push("G1 X" + first_point[0] + " Y" + first_point[1]);
+        gcode.push(gcode_tool_up);
+        //console.log(gcode.join("\n"));
+        // Add to g-code div
+        let gcodeDiv = document.getElementById("g-code");
+        let gcodeText = document.createTextNode(gcode.join("\n")+"\n");
+        gcodeDiv.appendChild(gcodeText);
+      }
 
+      var circles = doc.getElementsByTagName("circle");
+      for(let i = 0; i < circles.length; i++) {
+        let circle = circles[i];
+        let cx = circle.getAttribute("cx");
+        let cy = circle.getAttribute("cy");
+        let r = circle.getAttribute("r");
+        let gcode = [];
+        gcode.push(";Circle");
+        let start_x = parseFloat(cx)-parseFloat(r);
+        gcode = addGcode(gcode, "G0", start_x, cy);
+        gcode.push(gcode_tool_down);
+        gcode = addGcode(gcode, "G2", start_x, cy, "I" + r + " J0");
+        gcode.push(gcode_tool_up);
+        gcode.push(";Circle Done");
+        //console.log(gcode.join("\n"));
+        // Add to g-code div
+        let gcodeDiv = document.getElementById("g-code");
+        let gcodeText = document.createTextNode(gcode.join("\n")+"\n");
+        gcodeDiv.appendChild(gcodeText);
+      }
+
+      var ellipses = doc.getElementsByTagName("ellipse");
+
+      for(let i = 0; i < ellipses.length; i++) {
+        let ellipse = ellipses[i];
+        let cx = parseFloat(ellipse.getAttribute("cx"));
+        let cy = parseFloat(ellipse.getAttribute("cy"));
+        let rx = parseFloat(ellipse.getAttribute("rx"));
+        let ry = parseFloat(ellipse.getAttribute("ry"));
+        let gcode = [];
+        gcode.push(";Ellipse");
+        /*
+        let ratio = rx/ry;
+
+        // Calculate start and end angles of each arc
+        let sphereSizes = [
+           (rx>ry)?ry/ratio:rx/ratio,
+           (rx>ry)?rx/ratio:ry/ratio,
+           (rx>ry)?ry/ratio:rx/ratio,
+           (rx>ry)?rx/ratio:ry/ratio
+        ];
+
+        // Calculate center point of each arc
+        let centers = [
+          { x: cx + (sphereSizes[0]-rx)/2.0, y: cy },
+          { x: cx, y: cy + (-sphereSizes[1]+ry)/2.0 },
+          { x: cx + (-sphereSizes[1]+rx)/2.0, y: cy },
+          { x: cx, y: cy + (sphereSizes[3]-ry)/2.0 }
+        ];
+        let start_x = parseFloat(cx)-parseFloat(rx);
+
+        gcode.push("G0 X" + start_y + " Y" + cy);
+
+        // Generate G-code for each arc
+        for (let i = 0; i < 4; i++) {
+          let arc = angles[i];
+          let center = centers[i];
+          gcode.push(`G2 X${center.x} Y${center.y} I${rx} J${ry}`);
+          //gcode.push(`${direction} X${center.x} Y${center.y} I${-rx} J${ry}`);
+          //gcode.push(`${direction} X${center.x} Y${center.y} I${rx} J${ry}`);
+          //gcode.push(`${direction} X${center.x} Y${center.y} I${rx} J${-ry}`);
+        }
+        */
+        let start_x = cx+rx;
+        let start_y = cy;
+
+        // Estimate the ellipse with line segments
+        gcode = addGcode(gcode, "G0", start_x, start_y);
+        gcode.push(gcode_tool_down);
+        for (let i = 0; i < segments*2; i++) {
+          let x_ellipse = cx + rx * Math.cos(2 * Math.PI * i / (segments*2));
+          let y_ellipse = cy + ry * Math.sin(2 * Math.PI * i / (segments*2));
+          gcode = addGcode(gcode, "G1", x_ellipse, y_ellipse); // move to point on ellipse
+          
+        }
+        gcode = addGcode(gcode, "G1", start_x, start_y);
+        gcode.push(gcode_tool_up);
+        gcode.push(";Ellipse Done");
+        // Add to g-code div
+        let gcodeDiv = document.getElementById("g-code");
+        let gcodeText = document.createTextNode(gcode.join("\n")+"\n");
+        gcodeDiv.appendChild(gcodeText);
+      }
+
+      var lines = doc.getElementsByTagName("line");
+      for(let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+        let x1 = line.getAttribute("x1");
+        let y1 = line.getAttribute("y1");
+        let x2 = line.getAttribute("x2");
+        let y2 = line.getAttribute("y2");
+        let gcode = [];
+        gcode.push(";Line");        
+        gcode = addGcode(gcode, "G0", x1, y1);
+        gcode.push(gcode_tool_down);
+        gcode = addGcode(gcode, "G1", x2, y2);
+        gcode.push(gcode_tool_up);
+        gcode.push(";Line Done");
+        //console.log(gcode.join("\n"));
+        // Add to g-code div
+        let gcodeDiv = document.getElementById("g-code");
+        let gcodeText = document.createTextNode(gcode.join("\n")+"\n");
+        gcodeDiv.appendChild(gcodeText);
+      }
 
       /*
       var gcode = [];
@@ -328,6 +598,7 @@
       document.execCommand("Copy");
       textArea.remove();
     }
+    
   </script>
   <style type="text/css">
   #drop_zone {
@@ -343,7 +614,7 @@
     border: #999 1px;
     width: 400px;
     height: 800px;
-    padding: 8px;
+    padding: -8px;
     font-size: 18px;
     overflow: scroll;
     white-space: pre;
