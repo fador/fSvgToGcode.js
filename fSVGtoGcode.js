@@ -14,8 +14,11 @@
       this.last_x2 = 0.0;
       this.last_y2 = 0.0;
 
+
       this.segments = 20;
       this.DEBUG = true;
+      this.scale_x = 1.0;
+      this.scale_y = 1.0;
 
       this.gcode_tool_down = "M3 S1000";
       this.gcode_tool_up = "M5";
@@ -77,8 +80,11 @@
   }
 
   function addGcode(state, code, x, y, extra="") {
+    x = parseFloat(x)*state.scale_x;
+    y = parseFloat(y)*state.scale_y;
     if(x.toString().includes("e")) x = trimFixed(x);
     if(y.toString().includes("e")) y = trimFixed(y);
+
     state.gcode.push(code + " X" + x + " Y" + y +((extra!="")?" " + extra:""));
     return state.gcode;
   }
@@ -384,7 +390,18 @@
   }
 
 
-  function fSVGtoGcode(data, options={}) {
+  function processConfig(state, config) {
+    if(config.hasOwnProperty("tool_down_gcode")) state.setToolDownGcode(config.tool_down_gcode);
+    if(config.hasOwnProperty("tool_up_gcode")) state.setToolUpGcode(config.tool_up_gcode);
+    if(config.hasOwnProperty("init_gcode")) state.setInitGcode(config.init_gcode);
+    if(config.hasOwnProperty("scale_x")) state.scale_x = config.scale_x;
+    if(config.hasOwnProperty("scale_y")) state.scale_y = config.scale_y;
+    if(config.hasOwnProperty("segments")) state.segments = config.segments;
+    if(config.hasOwnProperty("DEBUG")) state.DEBUG = config.DEBUG;
+    
+  }
+
+  function fSVGtoGcode(data, config={}) {
     var parser = new DOMParser();
     var doc = parser.parseFromString(data, "image/svg+xml");
     const errorNode = doc.querySelector("parsererror");
@@ -394,6 +411,8 @@
     }
     var paths = doc.getElementsByTagName("path");
     var state = new State();
+
+    processConfig(state, config);
 
     console.log("Found " + paths.length + " paths");
 
@@ -540,6 +559,24 @@
       state.gcode = addGcode(state, "G1", x2, y2);
       state.gcode.push(state.gcode_tool_up);
       state.gcode.push(";Line Done");
+    }
+
+    var rects = doc.getElementsByTagName("rect");
+    for(let i = 0; i < rects.length; i++) {
+      let rect = rects[i];
+      let x = parseFloat(rect.getAttribute("x"));
+      let y = parseFloat(rect.getAttribute("y"));
+      let width = parseFloat(rect.getAttribute("width"));
+      let height = parseFloat(rect.getAttribute("height"));
+      state.gcode.push(";Rectangle");
+      state.gcode = addGcode(state, "G0", x, y);
+      state.gcode.push(state.gcode_tool_down);
+      state.gcode = addGcode(state, "G1", x+width, y);
+      state.gcode = addGcode(state, "G1", x+width, y+height);
+      state.gcode = addGcode(state, "G1", x, y+height);
+      state.gcode = addGcode(state, "G1", x, y);
+      state.gcode.push(state.gcode_tool_up);
+      state.gcode.push(";Rectangle Done");
     }
 
     /*

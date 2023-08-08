@@ -7,6 +7,15 @@
   <script type="text/javascript">
 
     var inputFilename = "";
+    const config = {
+      // Custom configuration options go here
+      DEBUG: false,
+      scale_x: 1.0,
+      scale_y: 1.0,
+      tool_down_gcode: "; Tool down\nM3",
+      tool_up_gcode: "; Tool up\nM5",
+      init_gcode: "G21\nG90\nG0 F1000\nG0 Z0\nG0 X0 Y0\n",
+    };
  
     function dropHandler(ev) {
       console.log("File(s) dropped");
@@ -20,7 +29,7 @@
         "load",
         () => {
           // this will then display a text file
-          let gcode = fSVGtoGcode(reader.result);
+          let gcode = fSVGtoGcode(reader.result, config);
           var gcodeDiv = document.getElementById("g-code");
           var gcodeText = document.createTextNode(gcode.join("\n")+"\n");
           gcodeDiv.appendChild(gcodeText);
@@ -59,7 +68,7 @@
       reader.addEventListener(
         "load",
         () => {
-          let gcode = fSVGtoGcode(reader.result);
+          let gcode = fSVGtoGcode(reader.result, config);
           var gcodeDiv = document.getElementById("g-code");
           var gcodeText = document.createTextNode(gcode.join("\n")+"\n");
           gcodeDiv.appendChild(gcodeText);
