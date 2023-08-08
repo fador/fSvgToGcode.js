@@ -50,6 +50,34 @@
       }
     }
 
+    
+    function uploadFile() {
+      const reader = new FileReader();
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = ".svg";
+      reader.addEventListener(
+        "load",
+        () => {
+          let gcode = fSVGtoGcode(reader.result);
+          var gcodeDiv = document.getElementById("g-code");
+          var gcodeText = document.createTextNode(gcode.join("\n")+"\n");
+          gcodeDiv.appendChild(gcodeText);
+        },
+        false,
+      );
+
+      fileInput.onchange = e => { 
+        var file = e.target.files[0]; 
+        inputFilename = file.name.toLowerCase();
+        reader.readAsText(file);
+      };
+      fileInput.click();
+
+      fileInput.remove();
+    }
+
+
     function dragOverHandler(ev) {
       console.log("File(s) in drop zone");
 
@@ -86,6 +114,7 @@
       URL.revokeObjectURL(link.href);
       link.remove();
     }
+
     
   </script>
   <style type="text/css">
@@ -111,8 +140,8 @@
 </head>
 
 <body>
-  <div id="drop_zone" ondrop="dropHandler(event);" ondragover="dragOverHandler(event);">
-  <p>Drag one or more files to this <i>drop zone</i>.</p>
+  <div id="drop_zone" ondrop="dropHandler(event);" ondragover="dragOverHandler(event);" onclick="uploadFile();">
+  <p>Drag a file to this <i>drop zone</i> or click to open file dialog.</p>
   </div>
   <br />
   Output: <a href="#" onClick="copyGcode(); return false;">copy</a> <a href="#" onClick="downloadGcode(); return false;">download</a> <a href="#" onClick="document.getElementById('g-code').innerHTML=''; return false;">clear</a>
