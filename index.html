@@ -77,6 +77,9 @@
         // Draw the lines
         let drawingPath = false;
 
+        let cur_x = 0.0;
+        let cur_y = 0.0;
+
         for(var i = 0; i < gcode.length; i++) {
           var line = gcode[i];
           if(line.startsWith("G0 ") || line.startsWith("G1 ") || line.startsWith("G2 ") || line.startsWith("G3 ")) {
@@ -87,26 +90,37 @@
             if(line.startsWith("G0")) {
               if(drawingPath) {
                 ctx.stroke();
+                ctx.beginPath();
+                ctx.strokeStyle = "#00FF00";
+                ctx.moveTo(cur_x, cur_y);
+                ctx.lineTo(x, y);
+                ctx.stroke();
               } else {
                 drawingPath = true;
               }
               ctx.beginPath();
               ctx.moveTo(x, y);
+              cur_x = x;
+              cur_y = y;
             } else if(line.startsWith("G1")) {
               ctx.strokeStyle = "#FF0000";
               ctx.strokeWidth = 1;
-              ctx.lineTo(x, y);            
+              ctx.lineTo(x, y);
+              cur_x = x;
+              cur_y = y;
             } else if(line.startsWith("G2 ")) {
               if(!line.includes("I") || !line.includes("J")) continue;
               // ToDo: Fix
               var ii = parseFloat(line.match(/I(-?\d+\.?\d*)/)[1]) * scale;
               var jj = parseFloat(line.match(/J(-?\d+\.?\d*)/)[1]) * scale;              
-              ctx.strokeStyle = "#00FF00";
+              ctx.strokeStyle = "#0000FF";
               ctx.strokeWidth = 1;
               ctx.arc(x+ii, y+jj, Math.sqrt(ii*ii + jj*jj), 0, 2*Math.PI);
               ctx.stroke();
               ctx.beginPath();
               ctx.moveTo(x, y);
+              cur_x = x;
+              cur_y = y;
             } else if(line.startsWith("G3 ")) {
               if(!line.includes("I") || !line.includes("J")) continue;
               /*
@@ -117,6 +131,8 @@
               ctx.strokeWidth = 1;
               ctx.arcTo(x+i, y+j, x, y, Math.sqrt(i*i + j*j));
               */
+              cur_x = x;
+              cur_y = y;
             }
           }
         }
