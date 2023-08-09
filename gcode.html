@@ -6,16 +6,133 @@
   <script type="text/javascript" src="fSVGtoGcode.js"></script>
   <script type="text/javascript">
 
+    // Global variables
+    var autoupdate = true;
+
+
     var inputFilename = "";
     const config = {
       // Custom configuration options go here
       DEBUG: false,
       scale_x: 1.0,
       scale_y: 1.0,
+      offset_x: 0.0,
+      offset_y: 0.0,
       tool_down_gcode: "; Tool down\nM3",
       tool_up_gcode: "; Tool up\nM5",
       init_gcode: "G21\nG90\nG0 F1000\nG0 Z0\nG0 X0 Y0\n",
     };
+
+    function visualize() {
+        var canvas = document.getElementById("visualizer-canvas");
+        var ctx = canvas.getContext("2d");
+        var gcodeDiv = document.getElementById("g-code");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        var gcode = gcodeDiv.innerText.split("\n");
+
+        // Parse the min and max values
+        var minX = 0;
+        var maxX = 0;
+        var minY = 0;
+        var maxY = 0;
+
+        for(var i = 0; i < gcode.length; i++) {
+          var line = gcode[i];
+          if(line.startsWith("G0 ") || line.startsWith("G1 ")) {
+            if(line.includes("X") && line.includes("Y")) {
+              var x = parseFloat(line.match(/X(-?\d+\.?\d*)/)[1]);
+              var y = parseFloat(line.match(/Y(-?\d+\.?\d*)/)[1]);
+              if(x < minX) minX = x;
+              if(x > maxX) maxX = x;
+              if(y < minY) minY = y;
+              if(y > maxY) maxY = y;
+            }
+          }
+        }
+
+        var scale_x = canvas.width / (maxX - minX);
+        var scale_y = canvas.height / (maxY - minY);
+
+        var scale = Math.min(scale_x, scale_y);
+        
+        var offset_x = -minX*scale;
+        var offset_y = -minY*scale;
+
+
+        // Draw the grid
+        ctx.strokeStyle = "#CCCCCC";
+        ctx.beginPath();
+        for(var x = 0; x < canvas.width; x += 10) {
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, canvas.height);
+        }
+        ctx.closePath();
+        ctx.stroke();
+
+        // Draw the lines
+        let drawingPath = false;
+
+        for(var i = 0; i < gcode.length; i++) {
+          var line = gcode[i];
+          if(line.startsWith("G0 ") || line.startsWith("G1 ") || line.startsWith("G2 ") || line.startsWith("G3 ")) {
+            if(!line.includes("X") || !line.includes("Y")) continue;
+              
+            var x = parseFloat(line.match(/X(-?\d+\.?\d*)/)[1]) * scale - offset_x;
+            var y = parseFloat(line.match(/Y(-?\d+\.?\d*)/)[1]) * scale - offset_y;
+            if(line.startsWith("G0")) {
+              if(drawingPath) {
+                ctx.closePath();
+                ctx.stroke();                
+              } else {
+                drawingPath = true;
+              }
+              ctx.beginPath();
+              ctx.moveTo(x, y);
+            } else if(line.startsWith("G1")) {
+              ctx.strokeStyle = "#FF0000";
+              ctx.strokeWidth = 1;
+              ctx.lineTo(x, y);            
+            } else if(line.startsWith("G2")) {
+              // ToDo: Fix
+              var i = parseFloat(line.match(/I(-?\d+\.?\d*)/)[1]);
+              var j = parseFloat(line.match(/J(-?\d+\.?\d*)/)[1]);
+              var diff_i = x - i;
+              var diff_j = y - j;
+
+              ctx.strokeStyle = "#00FF00";
+              ctx.strokeWidth = 1;
+              ctx.arcTo(i, j, x, y, Math.sqrt(diff_i*diff_i + diff_j*diff_j));
+            } else if(line.startsWith("G3")) {
+              // ToDo: Fix
+              var i = parseFloat(line.match(/I(-?\d+\.?\d*)/)[1]);
+              var j = parseFloat(line.match(/J(-?\d+\.?\d*)/)[1]);
+              var diff_i = x - i;
+              var diff_j = y - j;
+              ctx.strokeStyle = "#0000FF";
+              ctx.strokeWidth = 1;
+              ctx.arcTo(i, j, x, y, Math.sqrt(diff_i*diff_i + diff_j*diff_j));
+            }
+          }
+        }
+        if(drawingPath) {
+          ctx.closePath();
+          ctx.stroke();                
+        }
+    }
+
+    function convertToGcode() {
+      var svg_input_box = document.getElementById("svg-input-text");
+      let gcode = fSVGtoGcode(svg_input_box.value, config);
+      var gcodeDiv = document.getElementById("g-code");
+      gcodeDiv.innerHTML='';
+      var gcodeText = document.createTextNode(gcode.join("\n")+"\n");
+      gcodeDiv.appendChild(gcodeText);
+
+      if(document.getElementById("visualize").checked) {
+        visualize();
+      }
+    }
  
     function dropHandler(ev) {
       console.log("File(s) dropped");
@@ -28,11 +145,9 @@
       reader.addEventListener(
         "load",
         () => {
-          // this will then display a text file
-          let gcode = fSVGtoGcode(reader.result, config);
-          var gcodeDiv = document.getElementById("g-code");
-          var gcodeText = document.createTextNode(gcode.join("\n")+"\n");
-          gcodeDiv.appendChild(gcodeText);
+          var svg_input_box = document.getElementById("svg-input-text");
+          svg_input_box.value = reader.result;
+          convertToGcode();
         },
         false,
       );
@@ -68,10 +183,9 @@
       reader.addEventListener(
         "load",
         () => {
-          let gcode = fSVGtoGcode(reader.result, config);
-          var gcodeDiv = document.getElementById("g-code");
-          var gcodeText = document.createTextNode(gcode.join("\n")+"\n");
-          gcodeDiv.appendChild(gcodeText);
+          var svg_input_box = document.getElementById("svg-input-text");
+          svg_input_box.value = reader.result;
+          convertToGcode();
         },
         false,
       );
@@ -124,6 +238,17 @@
       link.remove();
     }
 
+    // On page load update the configuration
+    window.onload = function() {
+      document.getElementById("offset_x").value = config.offset_x;
+      document.getElementById("offset_y").value = config.offset_y;
+      document.getElementById("scale_x").value = config.scale_x;
+      document.getElementById("scale_y").value = config.scale_y;
+      document.getElementById("tool_up_gcode").value = config.tool_up_gcode;
+      document.getElementById("tool_down_gcode").value = config.tool_down_gcode;
+      document.getElementById("init_gcode").value = config.init_gcode;
+      document.getElementById("DEBUG").checked = config.DEBUG;
+    };
     
   </script>
   <style type="text/css">
@@ -139,7 +264,7 @@
     background-color: #EEE;
     border: #999 1px;
     width: 400px;
-    height: 800px;
+    height: 500px;
     padding: -8px;
     font-size: 18px;
     overflow: scroll;
@@ -149,13 +274,47 @@
 </head>
 
 <body>
+  <div id="configuration">
+    Offset X: <input type="text" name="offset_x" id="offset_x" value="0.0" onchange="config.offset_x = parseFloat(document.getElementById('offset_x').value);" />
+    Offset Y: <input type="text" name="offset_y" id="offset_y" value="0.0" onchange="config.offset_y = parseFloat(document.getElementById('offset_y').value);" />
+    Scale X: <input type="text" name="scale_x" id="scale_x" value="1.0" onchange="config.scale_x = parseFloat(document.getElementById('scale_x').value);" />
+    Scale Y: <input type="text" name="scale_y" id="scale_y" value="1.0" onchange="config.scale_y = parseFloat(document.getElementById('scale_y').value);" />    
+    Tool Up: <textarea name="tool_up_gcode" id="tool_up_gcode" onchange="config.tool_up_gcode = document.getElementById('tool_up_gcode').value;"></textarea>
+    Tool Down: <textarea name="tool_down_gcode" id="tool_down_gcode" value="" onchange="config.tool_down_gcode = document.getElementById('tool_down_gcode').value;"></textarea>
+    Init: <textarea name="init_gcode" id="init_gcode" value="" onchange="config.init_gcode = document.getElementById('init_gcode').value;"></textarea>
+  </div>
+  <br />
+
   <div id="drop_zone" ondrop="dropHandler(event);" ondragover="dragOverHandler(event);" onclick="uploadFile();">
   <p>Drag a file to this <i>drop zone</i> or click to open file dialog.</p>
   </div>
   <br />
   Output: <a href="#" onClick="copyGcode(); return false;">copy</a> <a href="#" onClick="downloadGcode(); return false;">download</a> <a href="#" onClick="document.getElementById('g-code').innerHTML=''; return false;">clear</a>
   <br />
-  <div id="g-code"></div>
+  <input type="checkbox" id="DEBUG" name="DEBUG" value="DEBUG" onchange="config.DEBUG = document.getElementById('DEBUG').checked;" />
+  <label for="DEBUG">Debug</label>
+  <input type="checkbox" id="autoupdate" name="autoupdate" value="autoupdate" onchange="autoupdate = document.getElementById('autoupdate').checked;" checked />
+  <label for="autoupdate">Auto update</label>
+  <input type="checkbox" id="visualize" name="visualize" value="visualize" checked />
+  <label for="visualize">Visualize</label>
+  <input type="submit" value="Convert" onclick="convertToGcode(); return false;" />  
+  <!-- G-code and SVG side by side -->
+<div style="display: flex;">
+  <!--<div  id="svg-input">-->
+    <textarea style="flex: 1;overflow:auto;" id="svg-input-text" rows="20" cols="50" onchange="if(autoupdate){ convertToGcode(); }">
+    <svg width="400" height="500" viewBox="0 0 400 800" xmlns="http://www.w3.org/2000/svg">
+      <g transform="translate(0, 0) scale(1, 1)">
+        <path d="M 0,0 L 100,0 L 100,100 L 0,100 L 0,0" fill="none" stroke="black" stroke-width="1" />
+      </g>
+      </svg>
+    </textarea>
+  <!--</div>-->
+  <div style="flex: 1;" id="g-code">
+  </div>
+  <!--<div style="flex: 2;" id="visualizer">-->
+    <canvas id="visualizer-canvas" width="1000" height="1000" style="flex: 2;border:1px solid #000000;"></canvas>
+  <!--</div>-->
+</div>
 
 </body>
 </html>
