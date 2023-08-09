@@ -3,7 +3,7 @@
 
 fSVGtoGcode.js is a JavaScript library that enables you to convert SVG (Scalable Vector Graphics) files into G-code, a language used to control CNC (Computer Numerical Control) machines. This library is designed to streamline the process of converting SVG drawings or designs into G-code instructions, allowing you to easily translate your vector graphics into machine-readable commands.
 
-**NOTE** This library only traces the outlines, the shapes are not filled at the moment
+**NOTE** This library only traces the outlines, the shapes are not filled at the moment. SVG element transforms are not calculated either.
 
 ## Features
 
@@ -19,6 +19,8 @@ fSVGtoGcode.js is a JavaScript library that enables you to convert SVG (Scalable
     - **Q/c** Quadratic Bezier curve: Estimated with line segments
     - **T/t** Smooth Quadratic Bezier curve: Not done
     - **A/a** Arc: Work in progress 
+- Included HTML interface supports loading SVG files and visualizing the output G-code
+
 
 ## Installation
 
@@ -27,6 +29,8 @@ You can include the library directly in your HTML:
 ```html
 <script src="path/to/fSVGtoGcode.js"></script>
 ```
+
+Sample interface is included as [index.html](index.html)
 
 ## Usage
 
