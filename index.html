@@ -56,16 +56,20 @@
 
         var scale = Math.min(scale_x, scale_y);
         
-        var offset_x = -minX*scale;
-        var offset_y = -minY*scale;
+        var offset_x = minX*scale;
+        var offset_y = minY*scale;
 
 
         // Draw the grid
         ctx.strokeStyle = "#CCCCCC";
         ctx.beginPath();
-        for(var x = 0; x < canvas.width; x += 10) {
+        for(var x = 0; x < canvas.width; x += 10 * scale) {
           ctx.moveTo(x, 0);
           ctx.lineTo(x, canvas.height);
+        }
+        for(var y = 0; y < canvas.height; y += 10 * scale) {
+          ctx.moveTo(0, y );
+          ctx.lineTo(canvas.width, y);
         }
         ctx.closePath();
         ctx.stroke();
@@ -82,8 +86,7 @@
             var y = parseFloat(line.match(/Y(-?\d+\.?\d*)/)[1]) * scale - offset_y;
             if(line.startsWith("G0")) {
               if(drawingPath) {
-                ctx.closePath();
-                ctx.stroke();                
+                ctx.stroke();
               } else {
                 drawingPath = true;
               }
@@ -93,30 +96,31 @@
               ctx.strokeStyle = "#FF0000";
               ctx.strokeWidth = 1;
               ctx.lineTo(x, y);            
-            } else if(line.startsWith("G2")) {
+            } else if(line.startsWith("G2 ")) {
+              if(!line.includes("I") || !line.includes("J")) continue;
               // ToDo: Fix
-              var i = parseFloat(line.match(/I(-?\d+\.?\d*)/)[1]);
-              var j = parseFloat(line.match(/J(-?\d+\.?\d*)/)[1]);
-              var diff_i = x - i;
-              var diff_j = y - j;
-
+              var ii = parseFloat(line.match(/I(-?\d+\.?\d*)/)[1]) * scale;
+              var jj = parseFloat(line.match(/J(-?\d+\.?\d*)/)[1]) * scale;              
               ctx.strokeStyle = "#00FF00";
               ctx.strokeWidth = 1;
-              ctx.arcTo(i, j, x, y, Math.sqrt(diff_i*diff_i + diff_j*diff_j));
-            } else if(line.startsWith("G3")) {
+              ctx.arc(x+ii, y+jj, Math.sqrt(ii*ii + jj*jj), 0, 2*Math.PI);
+              ctx.stroke();
+              ctx.beginPath();
+              ctx.moveTo(x, y);
+            } else if(line.startsWith("G3 ")) {
+              if(!line.includes("I") || !line.includes("J")) continue;
+              /*
               // ToDo: Fix
-              var i = parseFloat(line.match(/I(-?\d+\.?\d*)/)[1]);
-              var j = parseFloat(line.match(/J(-?\d+\.?\d*)/)[1]);
-              var diff_i = x - i;
-              var diff_j = y - j;
+              var i = parseFloat(line.match(/I(-?\d+\.?\d*)/)[1]) * scale - offset_x;
+              var j = parseFloat(line.match(/J(-?\d+\.?\d*)/)[1]) * scale - offset_y;              
               ctx.strokeStyle = "#0000FF";
               ctx.strokeWidth = 1;
-              ctx.arcTo(i, j, x, y, Math.sqrt(diff_i*diff_i + diff_j*diff_j));
+              ctx.arcTo(x+i, y+j, x, y, Math.sqrt(i*i + j*j));
+              */
             }
           }
         }
         if(drawingPath) {
-          ctx.closePath();
           ctx.stroke();                
         }
     }
