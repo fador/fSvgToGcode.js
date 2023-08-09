@@ -172,7 +172,7 @@
         case "h":
           state.gcode = toolDown(state, state.cur_x, state.cur_y);
           coord = parseCoords(d[pos++]);            
-          if(type == "V") state.cur_x = coord[0];
+          if(type == "H") state.cur_x = coord[0];
           else  state.cur_x += coord[0];            
           state.gcode = addGcode(state,"G1", state.cur_x, state.cur_y);
           state.nextCode = type;
