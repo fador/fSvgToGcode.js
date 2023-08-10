@@ -1,5 +1,5 @@
    
-   const FSVGTOCODE_VERSION = "0.1.0";
+   const FSVGTOCODE_VERSION = "0.1.5";
    
    // State-class
    class State {
@@ -28,6 +28,14 @@
       this.scale_y = 1.0;
       this.offset_x = 0.0;
       this.offset_y = 0.0;
+
+      this.local_scale_x = 1.0;
+      this.local_scale_y = 1.0;
+      this.local_offset_x = 0.0;
+      this.local_offset_y = 0.0;
+      this.local_invert_x = false;
+      this.local_invert_y = false;
+      this.local_matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
       this.gcode_tool_down = "M3 S1000";
       this.gcode_tool_up = "M5";
@@ -66,18 +74,24 @@
     }
     return state.gcode;
   }
-
-  function parseCoords(coords) {
-    let x = 0.0;
-    let y = 0.0;
-    let pos = 0;
-    let done = false;
-    coords = coords.split(',');
+  function parseCoords(d, pos, num=2) {
+    coords = d[pos].split(',');    
     let coord = [];
-    for(let i = 0; i < coords.length; i++) {
-      coord.push(parseFloat(coords[i].trim()));
+    if(coords.length < 2 && num == 2) {
+      if(d.length >= pos+2) {
+        coord.push(parseFloat(d[pos++].trim()));
+        coord.push(parseFloat(d[pos++].trim()));
+      } else {
+        coord.push(parseFloat(d[pos++].trim()));
+      }
     }
-    return coord;
+    else {
+      pos++;
+      for(let i = 0; i < coords.length; i++) {
+        coord.push(parseFloat(coords[i].trim()));
+      }
+    }
+    return [coord,pos];
   }
 
   function trimFixed(num) {
@@ -91,21 +105,36 @@
   function addGcode(state, code, x, y, extra="") {
     let x_temp = parseFloat(x);
     let y_temp = parseFloat(y);
+    
+    if(state.local_invert_x) x_temp *= -1;
+    if(state.local_invert_y) y_temp *= -1;
+
+    x_temp *= (state.scale_x * state.local_scale_x);
+    y_temp *= (state.scale_y * state.local_scale_y);
+
+    x_temp += state.offset_x + state.local_offset_x;
+    y_temp += state.offset_y + state.local_offset_y;
+    
+/*
+    let matrix = state.local_matrix;
+
+    x_temp = matrix.a*x_temp + matrix.c*y_temp + matrix.e;
+    y_temp = matrix.b*x_temp + matrix.d*y_temp + matrix.f;
+
     x_temp *= state.scale_x;
     y_temp *= state.scale_y;
-
     x_temp += state.offset_x;
     y_temp += state.offset_y;
-
-    if(x_temp.toString().includes("e")) x_temp = trimFixed(x);
-    if(y_temp.toString().includes("e")) y_temp = trimFixed(y);
+*/
+    //if(x_temp.toString().includes("e")) x_temp = trimFixed(x);
+    //if(y_temp.toString().includes("e")) y_temp = trimFixed(y);
 
     if(x_temp < state.min_x) state.min_x = x_temp;
     if(y_temp < state.min_y) state.min_y = y_temp;
     if(x_temp > state.max_x) state.max_x = x_temp;
     if(y_temp > state.max_y) state.max_y = y_temp;
 
-    state.gcode.push(code + " X" + x_temp + " Y" + y_temp +((extra!="")?" " + extra:""));
+    state.gcode.push(code + " X" + x_temp.toFixed(4) + " Y" + y_temp.toFixed(4) +((extra!="")?" " + extra:""));
     return state.gcode;
   }
 
@@ -120,6 +149,7 @@
     let pos = 0;
 
     let done = false;
+
 
     state.cur_x = 0.0; 
     state.cur_y = 0.0;
@@ -137,12 +167,12 @@
       state.inSubpath = (!isNaN(d[pos][0]) || d[pos][0] == '-');
       var type = state.inSubpath?state.nextCode:d[pos++];
       if(state.inSubpath && state.lastCode.toLowerCase() == "m" && type.toLowerCase() == "l") state.inSubpath = false;
-      if(state.DEBUG) state.gcode.push(";Type: " + type + "(" + state.inSubpath + ")");
+      if(state.DEBUG) state.gcode.push(";Type: " + type + " Scale: " + state.local_scale_x.toFixed(3) + ", " + state.local_scale_y.toFixed(3) + " Offset: " + state.local_offset_x.toFixed(3) + ", " + state.local_offset_y.toFixed(3));      
       switch(type) {
         case "M":
         case "m":
           state.gcode = toolUp(state, state.cur_x, state.cur_y);
-          coord = parseCoords(d[pos++]);
+          [coord,pos] = parseCoords(d,pos);
           if(type == "M") {
             state.cur_x = coord[0];
             state.cur_y = coord[1];
@@ -156,7 +186,7 @@
         case "L":
         case "l":
           state.gcode = toolDown(state, state.cur_x, state.cur_y);
-          coord = parseCoords(d[pos++]);            
+          [coord,pos] = parseCoords(d,pos);            
           if(type == "L") {
             state.cur_x = coord[0];
             state.cur_y = coord[1];
@@ -171,16 +201,16 @@
         case "H":
         case "h":
           state.gcode = toolDown(state, state.cur_x, state.cur_y);
-          coord = parseCoords(d[pos++]);            
+          [coord,pos] = parseCoords(d,pos, 1);            
           if(type == "H") state.cur_x = coord[0];
-          else  state.cur_x += coord[0];            
+          else  state.cur_x += coord[0]; 
           state.gcode = addGcode(state,"G1", state.cur_x, state.cur_y);
           state.nextCode = type;
           break;
         case "V":
         case "v":
           state.gcode = toolDown(state, state.cur_x, state.cur_y);
-          coord = parseCoords(d[pos++]);
+          [coord,pos] = parseCoords(d,pos, 1);
           if(type == "V") state.cur_y = coord[0];
           else  state.cur_y += coord[0];
           state.gcode = addGcode(state,"G1", state.cur_x, state.cur_y);
@@ -201,13 +231,13 @@
           var x_start = state.cur_x;
           var y_start = state.cur_y;
           
-          coord = parseCoords(d[pos++]);
+          [coord,pos] = parseCoords(d,pos);
           var x1 = coord[0];
           var y1 = coord[1];
-          coord = parseCoords(d[pos++]);
+          [coord,pos] = parseCoords(d,pos);
           var x2 = coord[0];
           var y2 = coord[1];
-          coord = parseCoords(d[pos++]);
+          [coord,pos] = parseCoords(d,pos);
           var x_end = coord[0];
           var y_end = coord[1];
 
@@ -261,10 +291,10 @@
           var x_start = state.cur_x;
           var y_start = state.cur_y;
 
-          coord = parseCoords(d[pos++]);
+          [coord,pos] = parseCoords(d,pos);
           var x1 = coord[0];
           var y1 = coord[1];
-          coord = parseCoords(d[pos++]);
+          [coord,pos] = parseCoords(d,pos);
           var x_end = coord[0];
           var y_end = coord[1];
           if(type == "q") { // relative
@@ -301,10 +331,10 @@
           var x_start = state.cur_x;
           var y_start = state.cur_y;
 
-          coord = parseCoords(d[pos++]);
+          [coord,pos] = parseCoords(d,pos);
           var x2 = coord[0];
           var y2 = coord[1];
-          coord = parseCoords(d[pos++]);
+          [coord,pos] = parseCoords(d,pos);
           var x_end = coord[0];
           var y_end = coord[1];
           if(type == "s") { // relative
@@ -364,7 +394,7 @@
             var x_start = state.cur_x;
             var y_start = state.cur_y;
 
-            coord = parseCoords(d[pos++]);
+            [coord,pos] = parseCoords(d,pos);
             var rx = coord[0];
             var ry = coord[1];
             var x_axis_rotation = d[pos++];
@@ -373,7 +403,7 @@
 
             state.gcode.push(";rx: " + rx + ", ry: " + ry + ", x-axis-rotation: " + x_axis_rotation + ", large-arc-flag: " + large_arc_flag + ", sweep-flag: " + sweep_flag);
 
-            coord = parseCoords(d[pos++]);
+            [coord,pos] = parseCoords(d,pos);
             var x_end = coord[0];
             var y_end = coord[1];
 
@@ -423,6 +453,98 @@
     
   }
 
+  function processTransform(state, transform) {
+    transform = transform.trim();
+    // Use regex to find function names
+    var functions = [...transform.matchAll(/([a-zA-Z]+\([0-9\.\,\-\s]+\))/g)];
+    //console.log(functions);
+    for(var i = 0; i < functions.length; i++) {
+      var matchedFunction = functions[i][0];
+      var functionName = matchedFunction.substring(0, matchedFunction.indexOf("(")).toLowerCase();
+
+      var data = matchedFunction.substring(matchedFunction.indexOf("(")+1, matchedFunction.indexOf(")")).split(",");
+      if(data.length == 1) data = matchedFunction.substring(matchedFunction.indexOf("(")+1, matchedFunction.indexOf(")")).split(" ");
+
+      for(var j = 0; j < data.length; j++) {
+        data[j] = parseFloat(data[j].trim());
+      }
+
+      if(functionName == "scale") {
+        state.local_scale_x *= data[0];
+        state.local_scale_y *= data[1];
+      }
+      if(functionName == "translate") {
+        state.local_offset_x += data[0];
+        state.local_offset_y += data[1];
+      }
+      if(functionName == "rotate") {
+        let angle = data[0] * Math.PI / 180.0;
+        let cos = Math.cos(angle);
+        let sin = Math.sin(angle);
+        let x = data[1];
+        let y = data[2];
+        state.local_scale_x *= cos;
+        state.local_scale_y *= cos;
+        state.local_offset_x += x - x*cos + y*sin;
+        state.local_offset_y += y - x*sin - y*cos;
+      }
+      if(functionName == "matrix") {
+        // Perform matrix multiplication
+        let a = data[0];
+        let b = data[1];
+        let c = data[2];
+        let d = data[3];
+        let e = data[4];
+        let f = data[5];
+        //if(a == 0 || d == 0) continue;
+        state.local_scale_x *= (a*state.local_scale_x)+state.local_scale_x*c;
+        state.local_scale_y *= (d*state.local_scale_y)+state.local_scale_y*b;
+        state.local_offset_x += e;
+        state.local_offset_y += f;
+      }
+    }
+    if(state.local_scale_x < 0) state.local_invert_x = true; else state.local_invert_x = false;
+    if(state.local_scale_y < 0) state.local_invert_y = true; else state.local_invert_y = false;
+
+    state.local_scale_x = Math.abs(state.local_scale_x);
+    state.local_scale_y = Math.abs(state.local_scale_y);
+
+    if(state.DEBUG) {
+      console.log("Local Scale: " + state.local_scale_x + ", " + state.local_scale_y);
+      console.log("Local Offset: " + state.local_offset_x + ", " + state.local_offset_y);
+    }
+    return state;
+  }
+
+  function processElement(state, element) {
+
+    state.local_scale_x = 1.0;
+    state.local_scale_y = 1.0;
+    state.local_offset_x = 0.0;
+    state.local_offset_y = 0.0;
+    state.local_invert_x = false;
+    state.local_invert_y = false;
+
+    var parent = element.parentElement;
+    // Process parent element transforms
+    while(parent != null && parent.tagName.toLowerCase() != "svg") {
+
+      var transform = parent.getAttribute("transform");
+      if(transform != null) {
+        state = processTransform(state, transform);
+      }
+      parent = parent.parentElement;
+    }
+    var transform = element.getAttribute("transform");
+    if(transform != null) {
+      state = processTransform(state, transform);
+    }
+    state.local_matrix = element.getCTM();
+    
+
+    return state;
+  }
+
   function fSVGtoGcode(data, config={}) {
     var parser = new DOMParser();
     var doc = parser.parseFromString(data, "image/svg+xml");
@@ -431,18 +553,32 @@
       console.log("Failed to parse SVG"+ errorNode.textContent);
       return [";Failed to parse SVG" + errorNode.textContent];
     }
-    var paths = doc.getElementsByTagName("path");
     var state = new State();
-
     processConfig(state, config);
+
+    var svg = doc.getElementsByTagName("svg")[0];
+    if(svg.getAttribute("width") != null && svg.getAttribute("width").includes("in")) {
+      state.scale_x *= 25.4;
+      state.scale_y *= 25.4;      
+    }
+    var paths = doc.getElementsByTagName("path");
+   
 
     console.log("Found " + paths.length + " paths");
 
     for(var i = -1; i < paths.length; i++) {
       if(i == -1) {
         state.gcode = state.gcode_init.split("\n");
-      } else {
+      } else {                
+
         var path = paths[i];
+
+        if(state.DEBUG && path.getAttribute("id") != null) {
+          console.log("Path: " + path.getAttribute("id"));
+        }        
+
+        state = processElement(state, path);
+        
         var d = path.getAttribute("d");
         state.gcode = parsePathD(state, d);
       }
@@ -452,11 +588,13 @@
 
     for(let i = 0; i < polylines.length; i++) {
       let polyline = polylines[i];
+      state = processElement(state, polyline);
       let points = polyline.getAttribute("points");
       points = points.split(/[\s]+/g);
+      console.log(state);
       for(let j = 0; j < points.length; j++) {
         points[j] = points[j].trim();
-      }        
+      }
       state.gcode.push(state.gcode_tool_down);
       for(let j = 0; j < points.length; j++) {
         let point = points[j].split(",");
@@ -473,6 +611,7 @@
     var polygons = doc.getElementsByTagName("polygon");
     for(let i = 0; i < polygons.length; i++) {
       let polygon = polygons[i];
+      state = processElement(state, polygon);
       let points = polygon.getAttribute("points");
       points = points.split(/[\s]+/g);
       for(let j = 0; j < points.length; j++) {
@@ -499,15 +638,18 @@
     var circles = doc.getElementsByTagName("circle");
     for(let i = 0; i < circles.length; i++) {
       let circle = circles[i];
+
+      state = processElement(state, circle);
+
       let cx = circle.getAttribute("cx");
       let cy = circle.getAttribute("cy");
-      let r = circle.getAttribute("r");
+      let r = parseFloat(circle.getAttribute("r"));
       
       state.gcode.push(";Circle");
-      let start_x = parseFloat(cx)-parseFloat(r);
+      let start_x = parseFloat(cx)-r;
       state.gcode = addGcode(state, "G0", start_x, cy);
       state.gcode.push(state.gcode_tool_down);
-      state.gcode = addGcode(state, "G2", start_x, cy, "I" + r + " J0");
+      state.gcode = addGcode(state, "G2", start_x, cy, "I" + r*state.scale_x*state.local_scale_x + " J0");
       state.gcode.push(state.gcode_tool_up);
       state.gcode.push(";Circle Done");
     }
@@ -516,6 +658,8 @@
 
     for(let i = 0; i < ellipses.length; i++) {
       let ellipse = ellipses[i];
+
+      state = processElement(state, ellipse);
       let cx = parseFloat(ellipse.getAttribute("cx"));
       let cy = parseFloat(ellipse.getAttribute("cy"));
       let rx = parseFloat(ellipse.getAttribute("rx"));
@@ -571,6 +715,7 @@
     var lines = doc.getElementsByTagName("line");
     for(let i = 0; i < lines.length; i++) {
       let line = lines[i];
+      state = processElement(state, line);
       let x1 = line.getAttribute("x1");
       let y1 = line.getAttribute("y1");
       let x2 = line.getAttribute("x2");

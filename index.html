@@ -20,7 +20,7 @@
       offset_y: 0.0,
       tool_down_gcode: "; Tool down\nM3",
       tool_up_gcode: "; Tool up\nM5",
-      init_gcode: "G21\nG90\nG0 F1000\nG0 Z0\nG0 X0 Y0\n",
+      init_gcode: "G21\nG90\nG0 F1000\n",
     };
 
     function visualize() {
@@ -189,7 +189,7 @@
         [...ev.dataTransfer.files].forEach((file, i) => {
           console.log(`… file[${i}].name = ${file.name}`);
           inputFilename = file.name.toLowerCase();
-          reader.readAsText(file);
+          reader.readAsText(file, "UTF-8");
         });
       }
     }
@@ -213,7 +213,7 @@
       fileInput.onchange = e => { 
         var file = e.target.files[0]; 
         inputFilename = file.name.toLowerCase();
-        reader.readAsText(file);
+        reader.readAsText(file, "UTF-8");
       };
       fileInput.click();
 
